@@ -7,7 +7,7 @@
 //!
 //! # Examples
 //!
-//! ```rust,no-run
+//! ```rust,no_run
 //! #![deny(unsafe_code)]
 //! #![deny(warnings)]
 //! #![no_std]
@@ -55,7 +55,6 @@
 //! ```
 
 #![no_std]
-
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(warnings)]
@@ -69,8 +68,8 @@
 extern crate embedded_hal as hal;
 
 use core::marker::PhantomData;
-use hal::digital::OutputPin;
 use hal::blocking::delay::DelayUs;
+use hal::digital::v2::OutputPin;
 
 // TODO: support EN pin
 //trait Enablable {
@@ -79,7 +78,7 @@ use hal::blocking::delay::DelayUs;
 //}
 
 /// Stepping mode (1:step_division)
-static STEP_DIVISION: [u8; 8] = [1,2,4,8,16,32,64,128];
+static STEP_DIVISION: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 
 /// A stepper motor driver generic struct
 #[derive(Debug)]
@@ -93,10 +92,10 @@ where
     delay: D,
     dir_pin: DIR,
     step_pin: STEP,
-//    TODO: support EN pin
-//    enable_pin: OutputPin,
-//    TODO: support driver specific stepping mode
-//    driver_impl: Some(),
+    //    TODO: support EN pin
+    //    enable_pin: OutputPin,
+    //    TODO: support driver specific stepping mode
+    //    driver_impl: Some(),
     _chip: PhantomData<CHIP>,
 
     /// usually 200
@@ -128,25 +127,24 @@ where
 
     /// Moves the motor smoothly `steps_to_move` steps.
     /// Increasing speed during the `steps_acc` and decreasing during `steps_dec` steps.
-    pub fn move_smooth(&mut self,
-                       steps_to_move: u64,
-                       steps_acc: u64,
-                       steps_dec: u64) {
+    pub fn move_smooth(&mut self, steps_to_move: u64, steps_acc: u64, steps_dec: u64) {
         let steps_to_move = (steps_to_move - steps_acc - steps_dec) * self.step_division as u64;
         let steps_acc = steps_acc * self.step_division as u64;
         let steps_dec = steps_dec * self.step_division as u64;
 
         (1..=steps_acc).for_each(|i| self.step(Some((i, steps_acc))));
         (0..steps_to_move).for_each(|_| self.step(None));
-        (1..=steps_dec).rev().for_each(|i| self.step(Some((i, steps_dec))));
+        (1..=steps_dec)
+            .rev()
+            .for_each(|i| self.step(Some((i, steps_dec))));
     }
 
     /// Set the direction
     pub fn set_direction(&mut self, clock_work: bool) {
         if clock_work {
-            self.dir_pin.set_low();
+            self.dir_pin.set_low().ok().unwrap();
         } else {
-            self.dir_pin.set_high();
+            self.dir_pin.set_high().ok().unwrap();
         }
     }
 
@@ -156,18 +154,18 @@ where
     /// Super naive implementation due to limitaions of the `embedded-hal` crate.
     /// One should use a timer instead of delay when `timer` and `time` API stabilize.
     fn step(&mut self, s: Option<(u64, u64)>) {
-        self.step_pin.set_high();
+        self.step_pin.set_high().ok().unwrap();
 
         let mut step_interval = self.step_interval;
         if let Some((s1, s2)) = s {
             let r1: f64 = s1 as f64 / s2 as f64;
-            let r2: f64 = 0.1 + 0.2*r1 + 2.2*r1*r1 - 1.5*r1*r1*r1;
+            let r2: f64 = 0.1 + 0.2 * r1 + 2.2 * r1 * r1 - 1.5 * r1 * r1 * r1;
             step_interval = (self.step_interval as f64 / r2) as u32;
         }
 
         // Wait at least step_min_time
         self.delay.delay_us(CHIP::STEP_MIN_TIME);
-        self.step_pin.set_low();
+        self.step_pin.set_low().ok().unwrap();
 
         // Wait the rest of step_interval but at least step_min_time
         let rest = if step_interval > CHIP::STEP_MIN_TIME {
@@ -179,14 +177,16 @@ where
     }
 
     /// Generic version of constructor
-    fn new(delay: D,
-           mut dir_pin: DIR,
-           mut step_pin: STEP,
-           number_of_steps: u16,
-           step_division: u8,
-           rpm: f32) -> Self {
-        dir_pin.set_high();
-        step_pin.set_low();
+    fn new(
+        delay: D,
+        mut dir_pin: DIR,
+        mut step_pin: STEP,
+        number_of_steps: u16,
+        step_division: u8,
+        rpm: f32,
+    ) -> Self {
+        dir_pin.set_high().ok().unwrap();
+        step_pin.set_low().ok().unwrap();
 
         MotorDriver {
             delay,
@@ -195,8 +195,8 @@ where
             _chip: PhantomData,
             number_of_steps,
             step_division,
-            step_interval: (60000000f32 / number_of_steps as f32
-                / rpm / step_division as f32) as u32,
+            step_interval: (60000000f32 / number_of_steps as f32 / rpm / step_division as f32)
+                as u32,
         }
     }
 }
@@ -212,7 +212,8 @@ macro_rules! driver {
     ($name:ident, $time:expr) => {
         #[allow(non_camel_case_types)]
         #[derive(Debug)]
-        struct $name;
+        /// The $name stepper driver model
+        pub struct $name;
 
         impl Params for $name {
             const STEP_MIN_TIME: u32 = $time;
@@ -222,20 +223,29 @@ macro_rules! driver {
         where
             D: DelayUs<u32>,
             DIR: OutputPin,
-            STEP: OutputPin
+            STEP: OutputPin,
         {
             /// Specialized constructor
-            pub fn $name(delay: D,
-                         dir_pin: DIR,
-                         step_pin: STEP,
-                         number_of_steps: u16,
-                         mut step_division: u8,
-                         rpm: f32) -> Self {
+            pub fn $name(
+                delay: D,
+                dir_pin: DIR,
+                step_pin: STEP,
+                number_of_steps: u16,
+                mut step_division: u8,
+                rpm: f32,
+            ) -> Self {
                 if !STEP_DIVISION.contains(&step_division) {
                     step_division = 1;
                 }
 
-                Self::new(delay, dir_pin, step_pin, number_of_steps, step_division, rpm)
+                Self::new(
+                    delay,
+                    dir_pin,
+                    step_pin,
+                    number_of_steps,
+                    step_division,
+                    rpm,
+                )
             }
         }
     };
